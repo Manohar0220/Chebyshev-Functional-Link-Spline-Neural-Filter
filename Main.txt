@@ -1,0 +1,187 @@
+clc;
+clear all;
+no_of_independent_trials = 10;
+for itr=1:no_of_independent_trials
+%Generating Random input of size 2e^5
+inp=2e5;
+x=rand(1,inp);
+
+%M is the size of input buffer
+M=10;
+
+%P is Chebyshev Polynomial order
+P=2;
+L=(M*P)+1;
+L2=(2*M*P)+1;
+
+%Parameters used for Nonlinear function
+zeta1=0.35;
+mu = 0.01;
+
+%Learning rates
+mu_l = 0.2;
+mu_fl = 0.2;
+delta= 1e-3;
+gamma = 1e-5;
+rho = 0.5;
+chi = 0.3;
+xi= 1e-4;
+alpha = 0.001;
+epsilon = 1e-2;
+
+%Generating Weights matrix
+W_c1=zeros(1,L);
+W_c2=zeros(1,L);
+W_c3=zeros(1,L);
+W_c4=zeros(1,L);
+W_cr=zeros(1,L);
+
+%Input buffer
+x_buffer= zeros(1,M);
+
+%Initializing Chebyshev polynomial terms
+T=zeros(1,P);
+T(1)=1;
+for i=1:length(x)
+x_buffer=[x(i) x_buffer(1:end-1)];
+
+%Defining the Nonlinear function
+if (abs(x(i))>=0) && (abs(x(i))<=zeta1)
+g1(i)=(2*x(i))/(3*zeta1);
+elseif (abs(x(i))>=zeta1) && (abs(x(i))<=(2*zeta1))
+g1(i)= ((3-(2-abs(x(i))/zeta1)^2)/3)*sign(x(i));
+elseif (abs(x(i))>=2*zeta1) && (abs(x(i))<=1)
+g1(i)= sign(x(i))
+end
+
+%Desired outputs
+%Adding Various types of noises separately to Model output to produce desired output
+%Generating and adding White Gaussian noise with SNR 24dB to the model output
+d1(i)= awgn(g1(i),24); %White gaussian noise
+
+%Generating and adding Salt & Pepper noise with noise density 0.05 or 5% to the model 
+%output
+d2(i) = imnoise(g1(i), 'salt & pepper', 0.05);% impulsive noise;
+
+%Generating and adding Speckle noise with noise density 0.05 or 5% to the model output
+d3(i)=imnoise(g1(i), 'speckle', 0.05); %white uniform noise;
+
+%Desired output with no noise
+d4(i)=g1(i);
+
+%Chebyshev polynomial array
+CFEB= [];
+for k =1:M
+T(2)= x_buffer(k);
+FEB=[];
+for p =2:P
+T(p+1)= (2*x_buffer(k)*T(p))- T(p-1);
+FEB=[FEB, T(p+1)];
+End
+CFEB= [CFEB,T(2),FEB];
+End
+
+%in_c is the whole Chebyshev polynomial 
+in_c= [1,CFEB];
+
+%Adding the weights to the expanded Chebyshev input terms to produce the Actual 
+%output
+Y_c1(i)= W_c1*in_c';
+Y_c2(i)= W_c2*in_c';
+Y_c3(i)= W_c3*in_c';
+Y_c4(i)= W_c4*in_c';
+
+%Error function
+er_c1(i) = d1(i) - Y_c1(i);
+er_c2(i) = d2(i) - Y_c2(i);
+er_c3(i) = d3(i) - Y_c3(i);
+er_c4(i) = d4(i) - Y_c4(i);
+for k =0:(M+L-1)
+if (k>=0) && (k<=(M-1))
+mu_k=mu_l;
+a=0; b= (M-1);
+else
+mu_k=mu_fl;
+a=M; b= (M+L-1);
+end
+
+%Learning rate matrix
+Lamda_b = diag(mu_k);
+
+%Parameters considered in the weights updating function
+l_c1 = max(rho * max(chi,max(abs(W_c1))), abs(W_c1));
+s_c1= sum(l_c1, 'all');
+l_c2 = max(rho * max(chi,max(abs(W_c2))), abs(W_c2));
+s_c2= sum(l_c2, 'all');
+l_c3 = max(rho * max(chi,max(abs(W_c3))), abs(W_c3));
+s_c3= sum(l_c3, 'all');
+l_c4 = max(rho * max(chi,max(abs(W_c4))), abs(W_c4));
+sc4= sum(l_c4, 'all');
+end
+for k =0:(M+L2-1)
+if (k>=0) && (k<=(M-1))
+mu_k=mu_l;
+a=0; b= (M-1);
+else
+mu_k=mu_fl;
+a=M; b= (M+L2-1);
+end
+Lamda_b = diag(mu_k);
+End
+Tau= gamma*Lamda_b;
+q_c1 = l_c1/s_c1;
+Q_c1= diag(q_c1);
+q_c2 = l_c2/s_c2;
+Q_c2= diag(q_c2);
+q_c3 = l_c3/s_c3;
+Q_c3= diag(q_c3);
+q_c4 = l_c2/s_c2;
+Q_c4= diag(q_c2);
+
+%Weights updating function
+W_c1= W_c1 + Lamda_b*(in_c*Q_c1*er_c1(i)/(in_c*Q_c1*in_c'+delta)) -
+Tau*sign(W_c1);
+W_c2= W_c2 + Lamda_b*(in_c*Q_c2*er_c2(i)/(in_c*Q_c2*in_c'+delta)) -
+Tau*sign(W_c2);
+W_c3= W_c3 + Lamda_b*(in_c*Q_c3*er_c3(i)/(in_c*Q_c3*in_c'+delta)) -
+Tau*sign(W_c3);
+W_c4= W_c4 + Lamda_b*(in_c*Q_c4*er_c4(i)/(in_c*Q_c4*in_c'+delta)) -
+Tau*sign(W_c4);
+End
+err_c1(itr,:)= er_c1.^2;
+err_c2(itr,:)= er_c2.^2;
+err_c3(itr,:)= er_c3.^2;
+err_c4(itr,:)= er_c4.^2;
+end
+
+%length of the smoothing filter
+length_of_smoothing_filter = 4000;
+smoothing_filter_coeff = 
+(1/length_of_smoothing_filter)*ones(1,length_of_smoothing_filter);
+for i=1:no_of_independent_trials
+
+%applying the smoothing filter to the error functions
+er_smooth_c1(i,:) = filter(smoothing_filter_coeff,1,err_c1(i,:));
+er_smooth_c2(i,:) = filter(smoothing_filter_coeff,1,err_c2(i,:));
+er_smooth_c3(i,:) = filter(smoothing_filter_coeff,1,err_c3(i,:));
+er_smooth_c4(i,:) = filter(smoothing_filter_coeff,1,err_c4(i,:));
+end
+
+%Calculating the Normalized Mean Square Error (NMSE)
+NMSE = 10*log10((mean(er_smooth_c1.^2)) / (mean(var(d1',1))))
+hold on;
+
+% Plotting the figures
+figure;
+x=plot(10*log10(mean(er_smooth_c1)));
+hold on
+y=plot(10*log10(mean(er_smooth_c2)));
+hold on
+z=plot(10*log10(mean(er_smooth_c3)));
+hold on
+w=plot(10*log10(mean(er_smooth_c4)));
+legend('white guassian noise','salt and pepper noise','speckle noise','without noise')
+xlabel('Iterations');
+ylabel('MSE (dB)');
+title('MSE for various noises');
+grid on;
